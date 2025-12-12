@@ -5,7 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ipython>=9.5.0",
     "librosa>=0.11.0",
+    "moviepy>=2.2.1",
+    "opensmile>=2.6.0",
     "pandas>=2.3.2",
+    "pydub>=0.25.1",
+    "seaborn>=0.13.2",
+    "sounddevice>=0.5.2",
+    "statsmodels>=0.14.5",
     "whisperx>=3.4.2",
 ]

@@ -10,3 +10,13 @@ wheels/
 .venv
 
 save_folder/*
+
+*.csv
+*.pdf
+*.wav
+*m4a
+
+*.numbers
+*.DS_Store
+*.xlsx
+
