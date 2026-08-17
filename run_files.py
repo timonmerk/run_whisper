@@ -124,6 +124,9 @@ df = pd.read_csv(PATH_, delimiter=",")
 unique_files = df['file'].dropna().unique()
 for file in tqdm(unique_files):
     df_dia_f = df[df['file'] == file]
+    sub = df_dia_f['subject'].iloc[0]
+    if sub != 8:
+        continue
     print(f"Processing file: {file}")
     filepath = file 
     out_path = os.path.join(PATH_OUT, os.path.basename(file).replace('.m4a', '_diarization.csv').replace('.wav', '_diarization.csv'))

@@ -49,8 +49,13 @@ l_audio_groups = {
     "Embeddings": l_audio_features[116:-1],
 }
 
+READ_RS = False
 
-PATH_AUDIO_FEATURES = "/Users/Timon/Library/CloudStorage/Box-Box/APL_BCM_Share_SUDS/Audio_Analysis/output_audio_features"
+PATH_BASE = "/Users/Timon/Library/CloudStorage/Box-Box/APL_BCM_Share_SUDS/Audio_Analysis"
+if READ_RS is False:
+    PATH_AUDIO_FEATURES = os.path.join(PATH_BASE, "output_audio_features")
+else:
+    PATH_AUDIO_FEATURES = os.path.join(PATH_BASE, "output_audio_features_resting-state")
 files_ = os.listdir(PATH_AUDIO_FEATURES)
 
 df_ = []
@@ -58,85 +63,66 @@ for f in files_:
     df = pd.read_csv(os.path.join(PATH_AUDIO_FEATURES, f))
     df_ = df_ + [df]
 df_audio = pd.concat(df_, axis=0, ignore_index=True)
-df_audio['time'] = pd.to_datetime(df_audio['time'])
+if READ_RS:
+    df_audio["date"] = pd.to_datetime(df_audio["date"])
+    df_audio["sub"] = df_audio["file"].apply(lambda x: int(os.path.basename(x).split('_')[0]))
+else:
+    df_audio['time'] = pd.to_datetime(df_audio['time'])
 
-PATH_FEATURES = "/Users/Timon/Documents/Houston/OCD_RCS/OCD_RCS/all_subjects_features.csv"
+if READ_RS:
+    PATH_FEATURES = "/Users/Timon/Documents/Houston/resting_state_OCD/FAUS_rs/fau_neural_combined.csv"
+else:
+    PATH_FEATURES = "/Users/Timon/Documents/Houston/OCD_RCS/OCD_RCS/all_subjects_features.csv"
+
 df_features = pd.read_csv(PATH_FEATURES)
-df_features["time"] = pd.to_datetime(df_features["time"])
+if READ_RS:
+    df_features["date"] = pd.to_datetime(df_features["date"])
+else:
+    df_features["time"] = pd.to_datetime(df_features["time"])
 # iterate through df_features, and extract for each row the plus minus 1 minute from df_audio, which also has a time column
-READ_AUDIO_FEATURES = False
+
+READ_AUDIO_FEATURES = True
 if READ_AUDIO_FEATURES:
     dfs = []
+    dfs_speech = []
+    dfs_non_speech = []
     for i, row in tqdm(df_features.iterrows()):
-        start_time = row['time'] - pd.Timedelta(minutes=1)
-        end_time = row['time'] + pd.Timedelta(minutes=1)
-        sub = row["subject"]
-        df_audio_sub = df_audio[df_audio['sub'] == sub]
-        mask = (df_audio_sub['time'] >= start_time) & (df_audio_sub['time'] <= end_time)
-        df_audio_sub_sud = df_audio_sub[mask]
-        # drop column file, score, text, speaker
-        df_audio_sub_sud_ = df_audio_sub_sud.drop(columns=["file", "score", "text", "speaker", "date", "time", "sub", "start", "end", "time_min_sec"], errors="ignore")
-        mean_features = df_audio_sub_sud_.mean(axis=0)
+        if READ_RS is False:
+            start_time = row['time'] - pd.Timedelta(minutes=1)
+            end_time = row['time'] + pd.Timedelta(minutes=1)
+            sub = row["subject"]
+            df_audio_sub = df_audio[df_audio['sub'] == sub]
+            mask = (df_audio_sub['time'] >= start_time) & (df_audio_sub['time'] <= end_time)
+            df_audio_sub_sud = df_audio_sub[mask]
+            # drop column file, score, text, speaker
+            df_audio_sub_sud_ = df_audio_sub_sud.drop(columns=["file", "score", "text", "speaker", "date", "time", "sub", "start", "end", "time_min_sec"], errors="ignore")
+            mean_features = df_audio_sub_sud_.mean(axis=0)
+            mean_features["duration_sum"] = df_audio_sub_sud_["duration"].sum()
+            mean_features["duration_ratio"] = mean_features["duration_sum"] / (2 * 60)  # divide by 2 minutes
+            
+        else:
+            sub = int(row["subject"][4:])
+            date = row["date"]
+            df_audio_sub = df_audio.query("sub == @sub and date == @date")
+            df_audio_sub_date_ = df_audio_sub.drop(columns=["file", "score", "text", "speaker", "date", "time", "subject", "start", "end", "duration"], errors="ignore")
+            mean_features = df_audio_sub_date_.mean(axis=0)
         # combine row and mean_features
         combined = pd.concat([row, mean_features])
 
         dfs = dfs + [combined]
 
     df_audio_features_comb = pd.DataFrame(dfs)
-    df_audio_features_comb.to_csv("audio_neural_features_combined.csv", index=False)
+    if READ_RS:
+        df_audio_features_comb.to_csv("audio_neural_features_combined_rs.csv", index=False)
+    else:
+        df_audio_features_comb.to_csv("audio_neural_features_combined.csv", index=False)
+        #df_audio_features_comb.to_csv("audio_neural_features_combined_suds_incl_speech_ratio.csv", index=False)
 else:
-    df_audio_features_comb = pd.read_csv("audio_neural_features_combined.csv")
+    if READ_RS:
+        df_audio_features_comb = pd.read_csv("audio_neural_features_combined_rs.csv")
+    else:   
+        df_audio_features_comb = pd.read_csv("audio_neural_features_combined.csv")
 
-# z-score normalization using npy
-df_audio_zs = df_audio_features_comb.copy().iloc[:, 1020:2160]
-df_audio_zs_mean = df_audio_zs.mean(axis=0)
-df_audio_zs_std = df_audio_zs.std(axis=0)
-df_audio_zs = (df_audio_zs - df_audio_zs_mean) / df_audio_zs_std
-# delete empty rows
-df_audio_zs = df_audio_zs.dropna(how='all')
-# get all columns in a colum "feature", "value"
-df_audio_zs_melt = df_audio_zs.melt(var_name="feature", value_name="value")
-# apply to the feature column the group names
-def get_feature_group(feature):
-    for group, features in l_audio_groups.items():
-        if feature in features:
-            return group
-    return "Other"
-df_audio_zs_melt["group"] = df_audio_zs_melt["feature"].apply(get_feature_group)
-
-subjects = df_features["subject"]
-nan_idx = df_features["SC_L_RawHjorth_Complexity"].isnull()
-subjects = subjects[~nan_idx]
-
-# make a heatmap plot of df_audio_zs for each group
-num_groups = len(l_audio_groups)
-fig, axes = plt.subplots(1, num_groups, figsize=(10, 4), sharex=True)
-for ax, (group, features) in zip(axes, l_audio_groups.items()):
-    df_group = df_audio_zs[features]
-    im = ax.imshow(df_group.T, aspect="auto",
-                   cmap="viridis", vmin=-3, vmax=3, interpolation="none")
-    ax.set_title(f"{group}")
-    # set x ticks to subject changes
-    subject_changes = np.where(subjects.diff().fillna(0) != 0)[0]
-    ax.set_xticks(subject_changes)
-    ax.set_xticklabels(subjects.iloc[subject_changes], rotation=90)
-# save figure
-plt.savefig("audio_features_groups_heatmap.pdf", bbox_inches='tight')
-
-
-plt.figure(figsize=(10, 6))
-plt.imshow(df_audio_zs, aspect="auto")
-
-# get the df part where df_audio_features_comb['valence'] is null
-df_null = df_audio_features_comb[df_audio_features_comb['valence'].isnull()]
-
-audio_corrs_start_idx = 1020
-audio_corrs_end_idx = 2159
-score_col = df_audio_features_comb["score"]
-patient = df_audio_features_comb["subject"]
-df_audio_features_comb = df_audio_features_comb.iloc[:, audio_corrs_start_idx:audio_corrs_end_idx]
-df_audio_features_comb["score"] = score_col
-df_audio_features_comb["subject"] = patient
 
 corrs_p_val = []
 for sub in df_audio_features_comb["subject"].unique():
@@ -215,6 +201,59 @@ plt.xlabel("Subject")
 plt.ylabel("Number of Significant Correlations")
 plt.savefig("audio_correlations.pdf")
 plt.show()
+
+
+# z-score normalization using npy
+df_audio_zs = df_audio_features_comb.copy().iloc[:, 1020:2160]
+df_audio_zs_mean = df_audio_zs.mean(axis=0)
+df_audio_zs_std = df_audio_zs.std(axis=0)
+df_audio_zs = (df_audio_zs - df_audio_zs_mean) / df_audio_zs_std
+# delete empty rows
+df_audio_zs = df_audio_zs.dropna(how='all')
+# get all columns in a colum "feature", "value"
+df_audio_zs_melt = df_audio_zs.melt(var_name="feature", value_name="value")
+# apply to the feature column the group names
+def get_feature_group(feature):
+    for group, features in l_audio_groups.items():
+        if feature in features:
+            return group
+    return "Other"
+df_audio_zs_melt["group"] = df_audio_zs_melt["feature"].apply(get_feature_group)
+
+subjects = df_features["subject"]
+nan_idx = df_features["SC_L_RawHjorth_Complexity"].isnull()
+subjects = subjects[~nan_idx]
+
+# make a heatmap plot of df_audio_zs for each group
+num_groups = len(l_audio_groups)
+fig, axes = plt.subplots(1, num_groups, figsize=(10, 4), sharex=True)
+for ax, (group, features) in zip(axes, l_audio_groups.items()):
+    df_group = df_audio_zs[features]
+    im = ax.imshow(df_group.T, aspect="auto",
+                   cmap="viridis", vmin=-3, vmax=3, interpolation="none")
+    ax.set_title(f"{group}")
+    # set x ticks to subject changes
+    subject_changes = np.where(subjects.diff().fillna(0) != 0)[0]
+    ax.set_xticks(subject_changes)
+    ax.set_xticklabels(subjects.iloc[subject_changes], rotation=90)
+# save figure
+plt.savefig("audio_features_groups_heatmap.pdf", bbox_inches='tight')
+
+
+plt.figure(figsize=(10, 6))
+plt.imshow(df_audio_zs, aspect="auto")
+
+# get the df part where df_audio_features_comb['valence'] is null
+df_null = df_audio_features_comb[df_audio_features_comb['valence'].isnull()]
+
+audio_corrs_start_idx = 1020
+audio_corrs_end_idx = 2159
+score_col = df_audio_features_comb["score"]
+patient = df_audio_features_comb["subject"]
+df_audio_features_comb = df_audio_features_comb.iloc[:, audio_corrs_start_idx:audio_corrs_end_idx]
+df_audio_features_comb["score"] = score_col
+df_audio_features_comb["subject"] = patient
+
 
 
 
